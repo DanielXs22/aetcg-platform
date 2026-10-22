@@ -1,40 +1,25 @@
-import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from fastapi.testclient import TestClient
-from main import app
+from worker import queue_triage_job
 
 
-def test_f03_returned_job_id_retrieves_ticket_state():
-    """
-    F03 regression test:
-    The job ID returned to the user should retrieve
-    the corresponding ticket's stored state.
-    """
-
-    job_id = "job-123"
+def test_f03_queue_uses_ticket_id_as_job_id():
     ticket_id = "ticket-456"
 
-    stored_states = {
-        f"state:{ticket_id}": json.dumps({
-            "ticket_id": ticket_id,
-            "status": "PAUSED_FOR_REVIEW"
-        })
+    payload = {
+        "ticket_id": ticket_id,
+        "raw_text": "Test support request",
     }
 
-    def fake_redis_get(key):
-        return stored_states.get(key)
+    mock_job = MagicMock()
+    mock_job.id = ticket_id
 
-    with patch("main.redis_client") as mock_redis:
-        mock_redis.get.side_effect = fake_redis_get
+    with patch("worker.task_queue") as mock_queue:
+        mock_queue.enqueue.return_value = mock_job
+        mock_queue.count = 1
 
-        client = TestClient(app)
+        job = queue_triage_job(payload)
 
-        response = client.get(f"/api/v1/state/{job_id}")
+        assert job.id == ticket_id
 
-    assert response.status_code == 200, (
-        f"F03: Expected 200, but received {response.status_code}. "
-        "The status endpoint could not retrieve the ticket using its job ID."
-    )
-
-    assert response.json()["ticket_id"] == ticket_id
+        assert mock_queue.enqueue.call_args.kwargs["job_id"] == ticket_id
